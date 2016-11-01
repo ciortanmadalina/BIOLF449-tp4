@@ -52,7 +52,7 @@ fragmentCount        geneName   size       fpkm          tpm
 "
 createCountsData <- function(input, allAnnotations){
   counts <- input
-  #rename V2 to counts
+  #rename V2 to fragmentCount
   colnames(counts)[2] <- "fragmentCount"
   
   #add a colum with the genes names with substring after . removed
@@ -155,36 +155,149 @@ plotMa(counts1$fpkm, counts2$fpkm )
 
 #Compute the FC, Log ratio and Pvalue by comparing the 10 first samples vs the 10 last (MANIFEST table order)
 
-aggregateSamples <- function(filenames, startIndex, endIndex) {
-  sample1 <- read.table(as.character(filenames[startIndex]), header = F)
-  counts1 <- createCountsData(sample1, allAnnotations)
-  
-  sumCounts <- counts1$fpkm
-  
-  #read in a loop all remaining files
-  for(i in (startIndex + 1):endIndex) {
-    sample <- read.table(as.character(filenames[i]), header = F)
-    
-    counts <- createCountsData(sample, allAnnotations)
-    sumCounts <- sumCounts + counts$fpkm
-  }
-  sumCounts
+"
+This function returns an array with the fpkm values calculated from given filename
+"
+fpkmFromSample <- function(filename){
+  sample <- read.table(as.character(filename), header = F)
+  counts <- createCountsData(sample, allAnnotations)
+  counts$fpkm
 }
 
-sum_sample_first_10 <- aggregateSamples(t$filename, 1, 10)
-sum_sample_last_10 <- aggregateSamples(t$filename, length(t$filename) - 10, length(t$filename))
+"
+population standard deviation = square root (1/n * sum (xi - xavg)^2 )
+"
+populationStandardDeviation <- function(v) {
+  average <- sum(v)/length(v)
+  sqrt(sum((v- average)^2)/(length(v)))
+}
+
+
+"
+sample standard deviation = square root (1/n-1 * sum (xi - xavg)^2 )
+"
+sampleStandardDeviation <- function(v) {
+  average <- sum(v)/length(v)
+  sqrt(sum((v- average)^2)/(length(v) -1))
+}
+
+
+"
+Puts together the FPKM values for each sample file as a separate column.
+Sample files are looked up in the manifest file from start index to end index.
+
+This method returns a data frame with endIndex-startIndex columns, each
+column storing the fpkm values for the sample.
+"
+sampleGroupFPKM <- function(filenames, startIndex, endIndex) {
+  #init result data frame with the first sample
+  fpkmBySample <- data.frame(fpkmFromSample(filenames[startIndex]))
+  #read in a loop all remaining files, for each add the column (using cbind)
+  for(i in (startIndex + 1):endIndex) {
+    fpkmBySample <- cbind(fpkmBySample, fpkmFromSample(filenames[i]))
+  }
+  fpkmBySample
+}
+
+"
+Returns the mean , sample standard deviation and the sample size for given group
+        mean         sd size
+1 2.12038246 1.35165583    3
+2 0.02048225 0.01100145    3
+3 1.63233015 0.19637812    3
+4 0.40758162 0.09295069    3
+"
+groupStatistics <- function(group) {
+  sampleGroupMean <- apply(group, 1 , mean)
+  sampleGroupStandardDeviation <- apply(group, 1 , sampleStandardDeviation)
+  sampleGroupSize <-apply(group, 1 , length)
+  sampleGroupStatistics <- data.frame(mean = sampleGroupMean, sd = sampleGroupStandardDeviation, size = sampleGroupSize)
+  sampleGroupStatistics
+}
+
+"
+Compute the mean, standard deviation and size for the 2 samples (first 10 files and last 10 files)
+head(first_10_samples)
+        mean         sd size
+1 2.12038246 1.35165583    3
+2 0.02048225 0.01100145    3
+3 1.63233015 0.19637812    3
+4 0.40758162 0.09295069    3
+"
+first_10_samples <- groupStatistics(sampleGroupFPKM(t$filename, 1, 10))
+last_10_samples <- groupStatistics(sampleGroupFPKM(t$filename, length(t$filename) - 10, length(t$filename)))
+
 
 FC <- function( a, b) {
   ifelse(a > b , a/b , - b/a)
 }
 
-samplesFC <- FC(sum_sample_first_10, sum_sample_last_10)
-samplesLogRatio <- log2FC(sum_sample_first_10, sum_sample_last_10)
+"
+Compute fold change and log ratio between the average values of first group sample (first 10 files)
+and the second group sample (last 10 files)
+"
+samplesFC <- FC(first_10_samples$mean, last_10_samples$mean)
+samplesLogRatio <- log2FC(first_10_samples$mean, last_10_samples$mean)
 
-pvalue <- cor.test(sum_sample_first_10,sum_sample_last_10)
+"
+one sample t test
+t = (sample mean - population mean)/(standard deviation / square root(sample size))
+"
+
+t.value <- function (v, populationMean){
+  sample.mean <- sum(v)/length(v)
+  standard.deviation <- sampleStandardDeviation(v)
+  (sample.mean - populationMean)/(standard.deviation/ sqrt(length(v)))
+}
 
 
-# Draw a volcano plot for the same groups (Pvalue using t-test)
+"
+Wikipedia suggests using Welch's t-test for testing the hypothesis that 2 populations
+have equal means : https://en.wikipedia.org/wiki/Welch%27s_t-test
+
+t = (average1 - average2)/square root( sd1 ^2 / n1 + sd2^2 / n2)
+
+"
+t.value.welch <- function (sample1, sample2) {
+  (sample1$mean - sample2$mean)/sqrt( sample1$sd^2 / sample1$size + sample2$sd^2 / sample2$size  )
+}
+
+p.value <- function (t.value, degreesOfFreedom) {
+  2*pt(-abs(t.value), df=degreesOfFreedom )
+}
 
 
+tValues <- t.value.welch(first_10_samples, last_10_samples)
+degreesOfFreedom <- last_10_samples$size[1] -1 #sample size -1
+
+pValues <- p.value(tValues, degreesOfFreedom)
+
+
+"
+Install library to get q value
+"
+source("https://bioconductor.org/biocLite.R")
+biocLite("qvalue")
+browseVignettes("qvalue")
+library(qvalue)
+
+qobj <- qvalue(p = pValues)
+qValues <- qobj$qvalues
+
+# we aggregate together the pvalues we obtained for the second sample group with the logFC 
+# and the q value calculated from p value
+volcanoData <- data.frame( pValues = pValues, logFC = samplesLogRatio, qValues = qValues)
+
+significant <- volcanoData[volcanoData$pValues < 0.05,]
+nonSignificant<-volcanoData[volcanoData$pValues >= 0.05,]
+
+pdf("volcano_plot.pdf")
+
+plot(nonSignificant$logFC, -log10(nonSignificant$pValues), main = "FPKM first 10 samples vs last 10 samples (pvalue)", xlab = "log2 Fold Change", ylab = "-log10 pvalue" , col="black")
+points(significant$logFC, -log10(significant$pValues), col="red")
+
+
+plot(nonSignificant$logFC, -log10(nonSignificant$qValues), main = "FPKM first 10 samples vs last 10 samples(qvalue)", xlab = "log2 Fold Change", ylab = "-log10 qValues" , col="black")
+points(significant$logFC, -log10(significant$qValues), col="red")
+dev.off()
 
