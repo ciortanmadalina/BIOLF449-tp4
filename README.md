@@ -19,5 +19,8 @@ samples vs the 10 last (MANIFEST table order)
 5. Draw a volcano plot for the same groups (Pvalue using t-test)
 6. Optional: Redo 5-8 using gene HUGO name instead of ENSG
 TP4 part B
-mail the report to madefran@ulb.ac.be before next course (9/11)
+mail the report to madefran@ulb.ac.be before next course (9/11)  
 Subject: [BIOLF-449 TP + FirstName Name]
+
+This project expects an input folder containing mart_export.csv and a data folder where the content of gdc has been unzipped.  
+Thus, the input/data folder contains MANIFEST.txt

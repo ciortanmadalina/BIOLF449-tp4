@@ -4,17 +4,21 @@ t <- read.table('MANIFEST.txt', header = T)
 
 #Read annotations file
 ensembl <-read.table('..\\mart_export.csv', header = T,sep=",")
-allAnnotations <- data.frame( geneName = ensembl$Ensembl.Gene.ID, size = ensembl$Gene.End..bp - ensembl$Gene.Start..bp)
+allAnnotations <- data.frame( geneName = ensembl$Ensembl.Gene.ID,
+                              start = ensembl$Gene.Start..bp., end = ensembl$Gene.End..bp.)
 
-#this method generated the read size column
-readSize <- function(v, commun){
-  filteredIds <- v[v$geneName %in% commun, ]
-  removeDuplicates <- filteredIds[match(unique(filteredIds$geneName), filteredIds$geneName),]
-  #sort by gene name and return
-  removeDuplicates[order(removeDuplicates$geneName), 'size']
+#this method returns a vector with the gene sizes for given gene names looked up in the 
+#annotations file
+#because in some cases the size of the same gene is variable, I was instructed to take
+#the delta between max(end) and min(start)
+findGeneSizeByGeneNameInAnnotations <- function(annotations, geneNames){
+  communGenes <- annotations[annotations$geneName %in% geneNames, ]
+  #communGenes contains duplicated data with sizes which don't always match
+  #I was advised to take the union between min(start) and max(end)
+  max(communGenes$end) - min(communGenes$start)
 }
 
-#generates fpkm column
+#generates fpkm array
 fpkm <- function(df){
   librarySize <- sum(df$fragmentCount)/ 1e6
   regionSize <- df$size/ 1e3
@@ -30,7 +34,7 @@ calculateTFactor <- function(df){
   sum(fragmentCount/regionSize) 
 }
 
-#generates tpm column
+#generates tpm array
 tpm <- function (df, factor) {
   regionSize <- df$size/ 1e3
   fragmentCount <- df$fragmentCount
@@ -67,12 +71,12 @@ createCountsData <- function(input, allAnnotations){
   #order counts by gene name in order to match the same elements in emsemble dataset
   counts <- counts[order(counts$geneName),]
   
-  commun <-intersect(counts$geneName, allAnnotations$geneName)
+  communGeneNames <-intersect(counts$geneName, allAnnotations$geneName)
   
-  counts <- counts[counts$geneName %in% commun, ]
+  counts <- counts[counts$geneName %in% communGeneNames, ]
 
   #Add size column
-  counts$size <-readSize(allAnnotations, commun)
+  counts$size <-findGeneSizeByGeneNameInAnnotations(allAnnotations, communGeneNames)
   
   #Add fpkm column
   counts$fpkm <-fpkm(counts)
@@ -219,10 +223,10 @@ groupStatistics <- function(group) {
 Compute the mean, standard deviation and size for the 2 samples (first 10 files and last 10 files)
 head(first_10_samples)
         mean         sd size
-1 2.12038246 1.35165583    3
-2 0.02048225 0.01100145    3
-3 1.63233015 0.19637812    3
-4 0.40758162 0.09295069    3
+1 2.12038246 1.35165583    10
+2 0.02048225 0.01100145    10
+3 1.63233015 0.19637812    10
+4 0.40758162 0.09295069    10
 "
 first_10_samples <- groupStatistics(sampleGroupFPKM(t$filename, 1, 10))
 last_10_samples <- groupStatistics(sampleGroupFPKM(t$filename, length(t$filename) - 10, length(t$filename)))
@@ -240,11 +244,10 @@ samplesFC <- FC(first_10_samples$mean, last_10_samples$mean)
 samplesLogRatio <- log2FC(first_10_samples$mean, last_10_samples$mean)
 
 "
-one sample t test
+one sample t test formula
 t = (sample mean - population mean)/(standard deviation / square root(sample size))
 "
-
-t.value <- function (v, populationMean){
+calculateTValueOneSample <- function (v, populationMean){
   sample.mean <- sum(v)/length(v)
   standard.deviation <- sampleStandardDeviation(v)
   (sample.mean - populationMean)/(standard.deviation/ sqrt(length(v)))
@@ -258,19 +261,19 @@ have equal means : https://en.wikipedia.org/wiki/Welch%27s_t-test
 t = (average1 - average2)/square root( sd1 ^2 / n1 + sd2^2 / n2)
 
 "
-t.value.welch <- function (sample1, sample2) {
+calculateTValueWelch <- function (sample1, sample2) {
   (sample1$mean - sample2$mean)/sqrt( sample1$sd^2 / sample1$size + sample2$sd^2 / sample2$size  )
 }
 
-p.value <- function (t.value, degreesOfFreedom) {
+calculatePValue <- function (t.value, degreesOfFreedom) {
   2*pt(-abs(t.value), df=degreesOfFreedom )
 }
 
 
-tValues <- t.value.welch(first_10_samples, last_10_samples)
+tValues <- calculateTValueWelch(first_10_samples, last_10_samples)
 degreesOfFreedom <- last_10_samples$size[1] -1 #sample size -1
 
-pValues <- p.value(tValues, degreesOfFreedom)
+pValues <- calculatePValue(tValues, degreesOfFreedom)
 
 
 "
