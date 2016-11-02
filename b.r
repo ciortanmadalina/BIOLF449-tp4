@@ -268,8 +268,9 @@ calculateTValueWelch <- function (sample1, sample2) {
 calculatePValue <- function (t.value, degreesOfFreedom) {
   2*pt(-abs(t.value), df=degreesOfFreedom )
 }
-
-
+##########################################
+#Caculate P values custom implementation
+##########################################
 tValues <- calculateTValueWelch(first_10_samples, last_10_samples)
 degreesOfFreedom <- last_10_samples$size[1] -1 #sample size -1
 
@@ -294,13 +295,78 @@ volcanoData <- data.frame( pValues = pValues, logFC = samplesLogRatio, qValues =
 significant <- volcanoData[volcanoData$pValues < 0.05,]
 nonSignificant<-volcanoData[volcanoData$pValues >= 0.05,]
 
+
+#####################################
+#Calculate p values using R functions
+#####################################
+
+#get the data for which we want to calculate p value
+#We have an aggregation of fpkm values, one column per samle
+"
+head(last10_values)
+fpkmFromSample.filenames.startIndex.. fpkmFromSample(filenames[i]) fpkmFromSample(filenames[i])
+1                          9.582833e-05                 1.751933e-04                 4.326993e-05
+2                          0.000000e+00                 0.000000e+00                 1.392809e-06
+"
+last10_values <-sampleGroupFPKM(t$filename, length(t$filename) - 10, length(t$filename))
+
+"
+This method will return a data frame with the following structure 
+
+ pvalue adjustedValue      
+1 0.10364300    0.10364300 
+2 0.96924370    0.96924370 
+3 0.01045046    0.01045046 
+4 0.01107144    0.01107144 
+"
+calculatePValueAndAdjustedValueWithR <- function (data, referenceMean){
+  pValueR = c()
+  pAdjustedValueR = c()
+  for(i in 1:nrow(data)) {
+    row <- data[i,]
+    t<- t.test(x= data[i,], mu = referenceMean[i])
+    #add p values for each gene
+    pValueR <- c(pValueR, t$p.value)
+    pAdjustedValueR <- c(pAdjustedValueR, p.adjust(t$p.value))
+  }
+  data.frame(pvalue = pValueR, adjustedValue = pAdjustedValueR)
+}
+
+
+volcanoDataR <- calculatePValueAndAdjustedValueWithR(last10_values, first_10_samples$mean)
+#add logFC to volcano data
+volcanoDataR$logFC <- samplesLogRatio
+
+"
+At this point volcanoDataR is like:
+ pvalue adjustedValue      logFC
+1 0.10364300    0.10364300 -0.6864264
+2 0.96924370    0.96924370  0.0177588
+3 0.01045046    0.01045046 -0.3411824
+4 0.01107144    0.01107144 -0.4364891
+"
+significantR <- volcanoDataR[volcanoDataR$pvalue < 0.05,]
+nonSignificantR<-volcanoDataR[volcanoDataR$pvalue >= 0.05,]
+
+
 pdf("volcano_plot.pdf")
 
+#plot results obtained with my implementation of pvalue
 plot(nonSignificant$logFC, -log10(nonSignificant$pValues), main = "FPKM first 10 samples vs last 10 samples (pvalue)", xlab = "log2 Fold Change", ylab = "-log10 pvalue" , col="black")
 points(significant$logFC, -log10(significant$pValues), col="red")
 
 
 plot(nonSignificant$logFC, -log10(nonSignificant$qValues), main = "FPKM first 10 samples vs last 10 samples(qvalue)", xlab = "log2 Fold Change", ylab = "-log10 qValues" , col="black")
 points(significant$logFC, -log10(significant$qValues), col="red")
+
+
+#plot results obtained with R implementation
+plot(nonSignificantR$logFC, -log10(nonSignificantR$pvalue), main = "FPKM first 10 samples vs last 10 samples (pvalue using t.test)", xlab = "log2 Fold Change", ylab = "-log10 pvalue" , col="black")
+points(significantR$logFC, -log10(significantR$pvalue), col="red")
+
+
+plot(nonSignificantR$logFC, -log10(nonSignificantR$adjustedValue), main = "FPKM first 10 samples vs last 10 samples(p.adjust)", xlab = "log2 Fold Change", ylab = "-log10 p.adjust" , col="black")
+points(significantR$logFC, -log10(significantR$adjustedValue), col="red")
+
 dev.off()
 
